@@ -1,0 +1,76 @@
+---
+- name: CIS 2.8 - audit and approved remediation (NT542 Lab)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    target_project: "project-2dcdd108-5e41-45e8-bed"
+    metric_name: "cis_28_firewall_change_count"
+    alert_name: "CIS 2.8 - Firewall rule changes (NT542 Lab)"
+    firewall_filter: >-
+      resource.type="gce_firewall_rule"
+      AND (protoPayload.methodName:"compute.firewalls.patch"
+      OR protoPayload.methodName:"compute.firewalls.insert"
+      OR protoPayload.methodName:"compute.firewalls.delete")
+
+  tasks:
+    - name: Check selected project
+      ansible.builtin.command:
+        argv: [gcloud, config, get-value, project]
+      register: project_value
+      changed_when: false
+
+    - name: Block wrong project
+      ansible.builtin.assert:
+        that:
+          - project_value.stdout == target_project
+
+    - name: Read metrics
+      ansible.builtin.command:
+        argv: [gcloud, logging, metrics, list, "--project={{ target_project }}", "--format=json"]
+      register: metrics_result
+      changed_when: false
+
+    - name: Read alert policies
+      ansible.builtin.command:
+        argv: [gcloud, monitoring, policies, list, "--project={{ target_project }}", "--format=json"]
+      register: alerts_result
+      changed_when: false
+
+    - name: Explain the intended changes
+      ansible.builtin.debug:
+        msg:
+          - "Approved: {{ approve_change | default(false) | bool }}"
+          - "Will create metric if missing: {{ metric_name }}"
+          - "Will create alert policy if missing: {{ alert_name }}"
+          - "Notifications require a separate approved email channel."
+
+    - name: Create CIS 2.8 metric only when approved and missing
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - logging
+          - metrics
+          - create
+          - "{{ metric_name }}"
+          - "--project={{ target_project }}"
+          - "--description=NT542 CIS 2.8: count firewall rule changes"
+          - "--log-filter={{ firewall_filter }}"
+      when:
+        - approve_change | default(false) | bool
+        - metric_name not in (metrics_result.stdout | from_json | map(attribute='name') | list)
+      changed_when: true
+
+    - name: Create CIS 2.8 metric alert when approved and missing
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - monitoring
+          - policies
+          - create
+          - "--project={{ target_project }}"
+          - "--policy-from-file={{ playbook_dir }}/cis_28_alert_policy.json"
+      when:
+        - approve_change | default(false) | bool
+        - alert_name not in (alerts_result.stdout | from_json | map(attribute='displayName') | list)
+      changed_when: true

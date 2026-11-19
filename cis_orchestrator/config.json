@@ -1,0 +1,18 @@
+{
+  "project_id": "project-2dcdd108-5e41-45e8-bed",
+  "controls": ["1.5", "1.6", "1.7", "2.5", "2.6", "2.7", "2.8", "2.9", "2.10", "2.13", "2.14", "3.6", "3.7", "4.3", "4.8", "4.9", "5.1", "5.2"],
+  "logging_metrics": {
+    "2.5": "cis_25_owner_change_count",
+    "2.6": "cis_26_audit_config_change_count",
+    "2.7": "cis_27_custom_role_change_count",
+    "2.8": "cis_28_firewall_change_count",
+    "2.9": "cis_29_route_change_count",
+    "2.10": "cis_210_network_change_count"
+  },
+  "playbooks": {
+    "2.13": "../remediate_dns_213.yml",
+    "2.14": "../remediate_214.yml",
+    "3.6": "../remediate_firewall_36_37.yml",
+    "3.7": "../remediate_firewall_36_37.yml"
+  }
+}

@@ -1,0 +1,169 @@
+---
+- name: CIS 2.5 2.6 2.7 2.9 2.10 - approved logging remediation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_project: "project-2dcdd108-5e41-45e8-bed"
+    notification_channel: "projects/project-2dcdd108-5e41-45e8-bed/notificationChannels/7993635890019693006"
+    logging_rules:
+      - cis: "2.5"
+        metric_name: "cis_25_owner_change_count"
+        alert_name: "CIS 2.5 - Project Owner changes (NT542 Lab)"
+        log_filter: >-
+          (protoPayload.serviceName="cloudresourcemanager.googleapis.com" AND
+          (ProjectOwnership OR projectOwnerInvitee))
+          OR (protoPayload.serviceData.policyDelta.bindingDeltas.action="REMOVE" AND
+          protoPayload.serviceData.policyDelta.bindingDeltas.role="roles/owner")
+          OR (protoPayload.serviceData.policyDelta.bindingDeltas.action="ADD" AND
+          protoPayload.serviceData.policyDelta.bindingDeltas.role="roles/owner")
+      - cis: "2.6"
+        metric_name: "cis_26_audit_config_change_count"
+        alert_name: "CIS 2.6 - Audit configuration changes (NT542 Lab)"
+        log_filter: >-
+          protoPayload.methodName="SetIamPolicy" AND
+          protoPayload.serviceData.policyDelta.auditConfigDeltas:*
+      - cis: "2.7"
+        metric_name: "cis_27_custom_role_change_count"
+        alert_name: "CIS 2.7 - Custom role changes (NT542 Lab)"
+        log_filter: >-
+          resource.type="iam_role" AND
+          (protoPayload.methodName="google.iam.admin.v1.CreateRole" OR
+          protoPayload.methodName="google.iam.admin.v1.DeleteRole" OR
+          protoPayload.methodName="google.iam.admin.v1.UpdateRole" OR
+          protoPayload.methodName="google.iam.admin.v1.UndeleteRole")
+      - cis: "2.9"
+        metric_name: "cis_29_route_change_count"
+        alert_name: "CIS 2.9 - VPC route changes (NT542 Lab)"
+        log_filter: >-
+          resource.type="gce_route" AND
+          (protoPayload.methodName:"compute.routes.delete" OR
+          protoPayload.methodName:"compute.routes.insert")
+      - cis: "2.10"
+        metric_name: "cis_210_network_change_count"
+        alert_name: "CIS 2.10 - VPC network changes (NT542 Lab)"
+        log_filter: >-
+          resource.type="gce_network" AND
+          (protoPayload.methodName:"compute.networks.insert" OR
+          protoPayload.methodName:"compute.networks.patch" OR
+          protoPayload.methodName:"compute.networks.delete" OR
+          protoPayload.methodName:"compute.networks.removePeering" OR
+          protoPayload.methodName:"compute.networks.addPeering")
+
+  tasks:
+    - name: Verify selected gcloud project
+      ansible.builtin.command:
+        argv: [gcloud, config, get-value, project]
+      register: current_project
+      changed_when: false
+
+    - name: Prevent changes to the wrong project
+      ansible.builtin.assert:
+        that:
+          - current_project.stdout == target_project
+          - notification_channel.startswith('projects/' + target_project + '/notificationChannels/')
+
+    - name: Read existing user-defined log metrics
+      ansible.builtin.command:
+        argv: [gcloud, logging, metrics, list, "--project={{ target_project }}", "--format=json"]
+      register: metrics_response
+      changed_when: false
+
+    - name: Read existing Monitoring policies
+      ansible.builtin.command:
+        argv: [gcloud, monitoring, policies, list, "--project={{ target_project }}", "--format=json"]
+      register: alerts_response
+      changed_when: false
+
+    - name: Verify email channel when approved
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - beta
+          - monitoring
+          - channels
+          - describe
+          - "{{ notification_channel }}"
+          - "--project={{ target_project }}"
+          - --format=json
+      register: channel_response
+      changed_when: false
+      when: approve_change | default(false) | bool
+
+    - name: Ensure an email channel is used
+      ansible.builtin.assert:
+        that:
+          - (channel_response.stdout | from_json).type == 'email'
+          - (channel_response.stdout | from_json).enabled | default(true) | bool
+      when: approve_change | default(false) | bool
+
+    - name: Show planned changes without applying them
+      ansible.builtin.debug:
+        msg:
+          - "Approved: {{ approve_change | default(false) | bool }}"
+          - "Project: {{ target_project }}"
+          - "Control: {{ item.cis }}"
+          - "Metric: {{ item.metric_name }}"
+          - "Alert: {{ item.alert_name }}"
+      loop: "{{ logging_rules }}"
+      loop_control:
+        label: "CIS {{ item.cis }}"
+
+    - name: Create log metrics only if approved and missing
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - logging
+          - metrics
+          - create
+          - "{{ item.metric_name }}"
+          - "--project={{ target_project }}"
+          - "--description=NT542 CIS {{ item.cis }} security-change counter"
+          - "--log-filter={{ item.log_filter }}"
+      loop: "{{ logging_rules }}"
+      loop_control:
+        label: "CIS {{ item.cis }} metric"
+      when:
+        - approve_change | default(false) | bool
+        - item.metric_name not in (metrics_response.stdout | from_json | map(attribute='name') | list)
+      changed_when: true
+
+    - name: Create linked alert policies only if approved and missing
+      vars:
+        alert_object:
+          displayName: "{{ item.alert_name }}"
+          enabled: true
+          combiner: OR
+          notificationChannels:
+            - "{{ notification_channel }}"
+          conditions:
+            - displayName: "Detect CIS {{ item.cis }} changes"
+              conditionThreshold:
+                filter: 'metric.type="logging.googleapis.com/user/{{ item.metric_name }}" AND resource.type="global"'
+                comparison: COMPARISON_GT
+                thresholdValue: 0
+                duration: "0s"
+                aggregations:
+                  - alignmentPeriod: "60s"
+                    perSeriesAligner: ALIGN_SUM
+                trigger:
+                  count: 1
+          documentation:
+            content: "NT542 Lab. Review corresponding CIS {{ item.cis }} activity logs."
+            mimeType: text/markdown
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - monitoring
+          - policies
+          - create
+          - "--project={{ target_project }}"
+          - "--policy={{ alert_object | to_json }}"
+      loop: "{{ logging_rules }}"
+      loop_control:
+        label: "CIS {{ item.cis }} alert"
+      when:
+        - approve_change | default(false) | bool
+        - item.alert_name not in (alerts_response.stdout | from_json | map(attribute='displayName') | list)
+      changed_when: true

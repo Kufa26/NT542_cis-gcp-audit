@@ -1,0 +1,115 @@
+---
+- name: CIS 2.13 - Enable DNS query logging
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_project: "project-2dcdd108-5e41-45e8-bed"
+    policy_name: "cis-213-dns-logging"
+    target_networks:
+      - default
+      - nt542-vpc
+    approve_change: false
+
+  tasks:
+    - name: Verify active GCP project
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - config
+          - get-value
+          - project
+      register: active_project
+      changed_when: false
+
+    - name: Prevent changes to wrong project
+      ansible.builtin.assert:
+        that:
+          - active_project.stdout == target_project
+
+    - name: Read VPC networks
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - networks
+          - list
+          - "--project={{ target_project }}"
+          - "--format=json"
+      register: networks_result
+      changed_when: false
+
+    - name: Verify expected VPC networks
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((networks_result.stdout | from_json
+            | map(attribute='name') | list | sort)
+            == (target_networks | sort))
+        fail_msg: "VPC inventory changed. Stop for review."
+
+    - name: Read existing DNS policies
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - dns
+          - policies
+          - list
+          - "--project={{ target_project }}"
+          - "--format=json"
+      register: policies_result
+      changed_when: false
+
+    - name: Parse DNS policies
+      ansible.builtin.set_fact:
+        existing_policies: "{{ policies_result.stdout | from_json }}"
+
+    - name: Verify safe DNS policy state
+      ansible.builtin.assert:
+        that:
+          - >-
+            (existing_policies | length == 0)
+            or
+            (existing_policies | length == 1
+            and existing_policies[0].name == policy_name)
+        fail_msg: "Unexpected DNS policy exists. Review manually."
+
+    - name: Show planned remediation
+      ansible.builtin.debug:
+        msg:
+          - "Project: {{ target_project }}"
+          - "Policy: {{ policy_name }}"
+          - "Networks: {{ target_networks | join(',') }}"
+          - "Approved: {{ approve_change | bool }}"
+          - "Existing policies: {{ existing_policies | length }}"
+
+    - name: Create DNS logging policy when approved
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - dns
+          - policies
+          - create
+          - "{{ policy_name }}"
+          - "--project={{ target_project }}"
+          - "--description=CIS 2.13 NT542 DNS Query Logging"
+          - "--networks={{ target_networks | join(',') }}"
+          - "--enable-logging"
+          - "--quiet"
+      when:
+        - approve_change | bool
+        - existing_policies | length == 0
+      changed_when: true
+
+    - name: Read policy after remediation
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - dns
+          - policies
+          - list
+          - "--project={{ target_project }}"
+          - "--format=json"
+      register: final_policies
+      changed_when: false

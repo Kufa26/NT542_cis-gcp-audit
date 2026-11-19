@@ -1,0 +1,111 @@
+---
+- name: CIS 3.10 - VPC Flow Logs Remediation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_project: "project-2dcdd108-5e41-45e8-bed"
+    subnet_name: "nt542-subnet"
+    subnet_region: "us-central1"
+    expected_network: "nt542-vpc"
+    approve_change: false
+
+  tasks:
+    - name: Verify active project
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - config
+          - get-value
+          - project
+      register: active_project
+      changed_when: false
+
+    - name: Prevent wrong-project changes
+      ansible.builtin.assert:
+        that:
+          - active_project.stdout | trim == target_project
+
+    - name: Read subnet configuration
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - networks
+          - subnets
+          - describe
+          - "{{ subnet_name }}"
+          - "--region={{ subnet_region }}"
+          - "--project={{ target_project }}"
+          - "--format=json"
+      register: subnet_result
+      changed_when: false
+
+    - name: Verify subnet identity
+      ansible.builtin.assert:
+        that:
+          - (subnet_result.stdout | from_json).name == subnet_name
+          - >-
+            (subnet_result.stdout | from_json).network
+            .split('/')[-1] == expected_network
+          - >-
+            (subnet_result.stdout | from_json).ipCidrRange
+            == '10.10.0.0/24'
+
+    - name: Show planned changes
+      ansible.builtin.debug:
+        msg:
+          - "Project: {{ target_project }}"
+          - "Subnet: {{ subnet_name }}"
+          - "Region: {{ subnet_region }}"
+          - "Enable VPC Flow Logs using Compute Engine API"
+          - "Sampling: 0.1"
+          - "Aggregation: 10 minutes"
+          - "Approved: {{ approve_change | bool }}"
+
+    - name: Enable VPC Flow Logs when approved
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - networks
+          - subnets
+          - update
+          - "{{ subnet_name }}"
+          - "--region={{ subnet_region }}"
+          - "--project={{ target_project }}"
+          - "--enable-flow-logs"
+          - "--logging-aggregation-interval=interval-10-min"
+          - "--logging-flow-sampling=0.1"
+          - "--logging-metadata=exclude-all"
+          - "--quiet"
+      when:
+        - approve_change | bool
+        - >-
+          not ((subnet_result.stdout | from_json)
+          .get('logConfig', {}).get('enable', false) | bool)
+      changed_when: true
+
+    - name: Read final subnet configuration
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - networks
+          - subnets
+          - describe
+          - "{{ subnet_name }}"
+          - "--region={{ subnet_region }}"
+          - "--project={{ target_project }}"
+          - "--format=json"
+      register: final_subnet
+      changed_when: false
+
+    - name: Verify Flow Logs after approval
+      ansible.builtin.assert:
+        that:
+          - >-
+            (final_subnet.stdout | from_json)
+            .get('logConfig', {}).get('enable', false) | bool
+      when: approve_change | bool

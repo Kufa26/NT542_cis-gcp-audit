@@ -1,0 +1,132 @@
+---
+- name: CIS 3.6 and 3.7 Firewall Remediation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_project: "project-2dcdd108-5e41-45e8-bed"
+    approve_change: false
+    target_rules:
+      - name: default-allow-ssh
+        port: "22"
+      - name: default-allow-rdp
+        port: "3389"
+
+  tasks:
+    - name: Verify active project
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - config
+          - get-value
+          - project
+      register: active_project
+      changed_when: false
+
+    - name: Prevent wrong-project changes
+      ansible.builtin.assert:
+        that:
+          - active_project.stdout | trim == target_project
+
+    - name: Read current VM inventory
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - instances
+          - list
+          - "--project={{ target_project }}"
+          - "--format=json"
+      register: vm_inventory
+      changed_when: false
+
+    - name: Verify no Compute VMs use default VPC
+      ansible.builtin.assert:
+        that:
+          - >-
+            (vm_inventory.stdout | from_json
+            | map(attribute='networkInterfaces')
+            | flatten
+            | selectattr('network', 'search', '/networks/default$')
+            | list | length) == 0
+        fail_msg: "A VM uses default VPC. Stop for review."
+
+    - name: Read target Firewall Rules
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - firewall-rules
+          - describe
+          - "{{ item.name }}"
+          - "--project={{ target_project }}"
+          - "--format=json"
+      loop: "{{ target_rules }}"
+      register: rule_reads
+      changed_when: false
+
+    - name: Verify exact rules before changing
+      ansible.builtin.assert:
+        that:
+          - (item.stdout | from_json).name == item.item.name
+          - (item.stdout | from_json).network.split('/')[-1] == 'default'
+          - (item.stdout | from_json).direction == 'INGRESS'
+          - (item.stdout | from_json).sourceRanges == ['0.0.0.0/0']
+          - >-
+            (item.stdout | from_json).allowed ==
+            [{'IPProtocol': 'tcp', 'ports': [item.item.port]}]
+        fail_msg: "Firewall configuration changed. Stop for review."
+      loop: "{{ rule_reads.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Show planned changes
+      ansible.builtin.debug:
+        msg:
+          - "Project: {{ target_project }}"
+          - "Rules: default-allow-ssh, default-allow-rdp"
+          - "Action: disable rules, do not delete"
+          - "Approved: {{ approve_change | bool }}"
+
+    - name: Disable public SSH and RDP rules
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - firewall-rules
+          - update
+          - "{{ item.item.name }}"
+          - "--project={{ target_project }}"
+          - "--disabled"
+          - "--quiet"
+      loop: "{{ rule_reads.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when:
+        - approve_change | bool
+        - not ((item.stdout | from_json).get('disabled', false) | bool)
+      changed_when: true
+
+    - name: Read final Firewall Rules
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - firewall-rules
+          - describe
+          - "{{ item.name }}"
+          - "--project={{ target_project }}"
+          - "--format=json"
+      loop: "{{ target_rules }}"
+      register: final_rules
+      changed_when: false
+
+    - name: Verify both rules are disabled after approval
+      ansible.builtin.assert:
+        that:
+          - (item.stdout | from_json).get('disabled', false) | bool
+      loop: "{{ final_rules.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: approve_change | bool

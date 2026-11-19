@@ -1,0 +1,49 @@
+---
+- name: CIS 2.14 Cloud Asset API Remediation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_project: "project-2dcdd108-5e41-45e8-bed"
+
+  tasks:
+    - name: Verify active project
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - config
+          - get-value
+          - project
+      register: active_project
+      changed_when: false
+
+    - name: Prevent wrong-project changes
+      ansible.builtin.assert:
+        that:
+          - active_project.stdout == target_project
+
+    - name: Audit enabled APIs
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - services
+          - list
+          - --enabled
+          - "--project={{ target_project }}"
+          - --format=value(config.name)
+      register: enabled_apis
+      changed_when: false
+
+    - name: Enable Cloud Asset API if approved
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - services
+          - enable
+          - cloudasset.googleapis.com
+          - "--project={{ target_project }}"
+      when:
+        - "'cloudasset.googleapis.com' not in enabled_apis.stdout_lines"
+        - approve_change | default(false) | bool
+      changed_when: true

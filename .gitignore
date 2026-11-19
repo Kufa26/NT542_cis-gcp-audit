@@ -1,0 +1,45 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Audit results and logs
+report/
+before/
+after/
+before_saved/
+cis_orchestrator/runs/
+runs/
+evidence/
+*.log
+
+# Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+*service-account*.json
+*secret*.json
+application_default_credentials.json
+
+# Generated files
+*.zip
+*.pdf
+*.docx
+
+# System
+.DS_Store
+
+# Additional local audit files
+audit_after.txt
+audit_output.txt
+iam_policy_before.json
+cis_28_alert_policy.json
+cis_28_alert_policy.backup.json
+audit_dns_213_backup.py
