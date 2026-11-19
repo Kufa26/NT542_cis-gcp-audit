@@ -1,4 +1,4 @@
-# CIS GCP Audit Orchestrator — phiên bản thử nghiệm
+# CIS GCP Audit Orchestrator
 
 **Mục đích:** Từ các bài kiểm tra CIS GCP Foundation v5.0.0 mà nhóm đã thực hiện, chạy **18 tiêu chí trong một lệnh**, tự thu thập chứng cứ, tự đánh giá và xuất báo cáo **chỉ các tiêu chí PASS**. Kết quả đầy đủ vẫn được lưu riêng, không bị xóa/sửa nhằm bảo toàn tính trung thực của bài kiểm tra.
 
@@ -32,7 +32,7 @@ cis_orchestrator/runs/20261113T101500Z_1234/audit/
 
 Lệnh trả exit code `0` nếu tất cả 18 PASS, `3` nếu có mục chưa PASS; cả hai trường hợp đều xuất báo cáo. `2` nếu phát hiện mismatch Project hoặc lỗi CLI/thiết lập. **Không ghi đè** các thư mục `before/`, `after/`, `report/` đã có.
 
-## Giới hạn kiểm tra (đọc kỹ trước khi đưa vào báo cáo)
+## Giới hạn kiểm tra
 
 - IAM 1.6/1.7 chỉ kiểm tra role bindings trực tiếp ở cấp Project, không chứng nhận quyền kế thừa, custom role hoặc chính sách ở từng service account.
 - Monitoring 2.5–2.10 so tên metric đã tạo, filter không rỗng, liên kết với alert đang bật và notification channel đã bật. Chưa kiểm thử việc thực sự nhận cảnh báo qua email, cũng chưa chứng minh filter bắt đúng toàn bộ loại sự kiện.
