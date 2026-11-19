@@ -42,7 +42,7 @@ Lệnh trả exit code `0` nếu tất cả 18 PASS, `3` nếu có mục chưa P
 - Audit **không tự thay đổi Cloud**. Cloud Logging/Monitoring khi đã được bật trong Project có thể phát sinh phí; thao tác Audit không tự bật các dịch vụ này.
 - File chứng cứ IAM có thể chứa danh tính/địa chỉ email; **không đăng public thư mục `runs/`**.
 
-## Khắc phục bằng Ansible — chỉ khi đã được chủ Project phê duyệt
+## Khắc phục bằng Ansible
 
 Chạy xem danh sách playbook an toàn được cho phép:
 
